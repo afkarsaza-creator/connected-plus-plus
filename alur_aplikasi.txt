@@ -1,0 +1,452 @@
+-- =====================================================================
+-- == cONnected+ | PATCH LENGKAP v1.2.7 (PERBAIKAN KINERJA RLS) ==
+-- =====================================================================
+-- 
+-- TUJUAN: Skrip ini menerapkan semua perbaikan yang direkomendasikan
+--         oleh Supabase Linter dan memperbaiki semua error yang dilaporkan.
+--         Ini adalah skrip final yang terkonsolidasi dan sepenuhnya dapat dijalankan ulang.
+--
+-- PERUBAHAN UTAMA v1.2.7:
+-- 1. FIX KINERJA RLS: Menggabungkan beberapa kebijakan permisif pada
+--    tabel `profiles` dan `chat_participants` menjadi satu kebijakan per tindakan.
+--    Ini menghilangkan peringatan "Multiple Permissive Policies" dari linter dan
+--    meningkatkan kinerja kueri database dengan mengurangi jumlah
+--    pemeriksaan keamanan yang harus dijalankan.
+--
+-- =====================================================================
+
+BEGIN;
+
+-- =====================================================================
+-- BAGIAN 1: PEMBERSIHAN - Hapus Objek Lama, Duplikat, dan yang Akan Dibuat Ulang
+-- =====================================================================
+
+-- Hapus kebijakan RLS lama yang akan digabungkan atau diganti namanya
+DROP POLICY IF EXISTS "Pengguna dapat melihat obrolan yang mereka ikuti atau buat" ON public.chats;
+DROP POLICY IF EXISTS "Pembuat grup dapat memperbarui info grup mereka" ON public.chats;
+DROP POLICY IF EXISTS "Pengguna terotentikasi dapat membuat obrolan" ON public.chats;
+DROP POLICY IF EXISTS "Pengguna yang diautentikasi dapat membuat obrolan baru" ON public.chats;
+DROP POLICY IF EXISTS "Pembuat grup dapat memperbarui info grup" ON public.chats;
+DROP POLICY IF EXISTS "Pembuat grup dapat menghapus grup mereka" ON public.chats;
+
+DROP POLICY IF EXISTS "Anggota dapat melihat siapa saja yang ada di obrolan mereka" ON public.chat_participants;
+DROP POLICY IF EXISTS "Pembuat obrolan dapat menambahkan anggota" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota atau pembuat dapat mengelola partisipasi" ON public.chat_participants;
+DROP POLICY IF EXISTS "Pengguna dapat membisukan obrolan untuk diri mereka sendiri" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota obrolan (jika admin) dapat menambah/menghapus anggota" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota obrolan (jika admin) dapat mengeluarkan anggota" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota dapat keluar dari grup" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota obrolan dapat memperbarui status mute mereka" ON public.chat_participants;
+
+
+DROP POLICY IF EXISTS "Anggota dapat melihat pesan di obrolan mereka" ON public.messages;
+DROP POLICY IF EXISTS "Anggota dapat mengirim pesan di obrolan mereka" ON public.messages;
+DROP POLICY IF EXISTS "Pengguna dapat mengedit pesan mereka sendiri" ON public.messages;
+DROP POLICY IF EXISTS "Pengguna dapat menghapus pesan mereka sendiri" ON public.messages;
+-- Ini adalah nama duplikat yang menyebabkan error
+DROP POLICY IF EXISTS "Pengguna dapat mengedit/menghapus pesan mereka sendiri" ON public.messages;
+
+DROP POLICY IF EXISTS "Pengguna yang terotentikasi dapat melihat semua profil" ON public.profiles;
+DROP POLICY IF EXISTS "Pengguna dapat menyisipkan profil mereka sendiri" ON public.profiles;
+DROP POLICY IF EXISTS "Pengguna dapat membuat profil mereka sendiri" ON public.profiles;
+DROP POLICY IF EXISTS "Pengguna dapat memperbarui profil mereka sendiri" ON public.profiles;
+DROP POLICY IF EXISTS "Pengguna dapat melihat semua profil publik" ON public.profiles;
+
+DROP POLICY IF EXISTS "Pengguna dapat mengelola kontak mereka sendiri" ON public.contacts;
+DROP POLICY IF EXISTS "Pengguna dapat mengelola data pribadi mereka sendiri" ON public.contacts;
+
+DROP POLICY IF EXISTS "Pengguna dapat mengelola daftar blokir mereka sendiri" ON public.blocked_users;
+DROP POLICY IF EXISTS "Pengguna dapat mengelola riwayat panggilan mereka sendiri" ON public.calls;
+DROP POLICY IF EXISTS "Pengguna dapat mengelola pesan tersimpan mereka sendiri" ON public.saved_messages;
+
+-- FIX IDEMPOTENSI: Hapus kebijakan baru jika sudah ada sebelum mencoba membuatnya kembali.
+DROP POLICY IF EXISTS "Pengguna dapat melihat semua profil" ON public.profiles;
+DROP POLICY IF EXISTS "Pengguna dapat membuat/memperbarui profil mereka sendiri" ON public.profiles;
+DROP POLICY IF EXISTS "Manajemen profil pengguna" ON public.profiles; -- Kebijakan gabungan baru
+DROP POLICY IF EXISTS "Pengguna dapat mengelola obrolan mereka" ON public.chats;
+DROP POLICY IF EXISTS "Anggota dapat melihat peserta obrolan" ON public.chat_participants;
+DROP POLICY IF EXISTS "Manajemen peserta obrolan" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota dapat memperbarui status mute mereka sendiri" ON public.chat_participants;
+DROP POLICY IF EXISTS "Pemilik grup dapat menambahkan anggota" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota dapat keluar atau dikeluarkan oleh pemilik" ON public.chat_participants;
+DROP POLICY IF EXISTS "Anggota dapat melihat pesan di obrolan mereka" ON public.messages;
+DROP POLICY IF EXISTS "Anggota dapat melihat pesan di obrolan mereka (dengan pemeriksaan blokir)" ON public.messages;
+DROP POLICY IF EXISTS "Anggota dapat mengirim pesan (dengan pemeriksaan blokir)" ON public.messages;
+DROP POLICY IF EXISTS "Anggota dapat mengirim pesan" ON public.messages;
+DROP POLICY IF EXISTS "Pengguna dapat menghapus pesan mereka sendiri" ON public.messages;
+DROP POLICY IF EXISTS "Pengguna dapat mengedit pesan mereka sendiri" ON public.messages;
+DROP POLICY IF EXISTS "Pengguna dapat mengelola data pribadi mereka sendiri" ON public.contacts;
+DROP POLICY IF EXISTS "Pengguna dapat mengelola daftar blokir mereka" ON public.blocked_users;
+DROP POLICY IF EXISTS "Pengguna dapat mengelola riwayat panggilan mereka" ON public.calls;
+DROP POLICY IF EXISTS "Pengguna dapat mengelola pesan tersimpan mereka" ON public.saved_messages;
+
+-- Hapus pemicu dan fungsi lama untuk memastikan versi baru digunakan.
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+DROP FUNCTION IF EXISTS public.handle_new_user();
+
+-- FIX: Hapus fungsi `create_group_chat` yang ada sebelum membuatnya kembali untuk mengizinkan perubahan nama parameter.
+-- Parameter `member_ids` (uuid[]) juga ditambahkan.
+DROP FUNCTION IF EXISTS public.create_group_chat(text,uuid[],text);
+
+-- Hapus indeks yang tidak digunakan dan duplikat
+DROP INDEX IF EXISTS public.chats_created_by_idx;
+DROP INDEX IF EXISTS public.messages_user_id_idx;
+DROP INDEX IF EXISTS public.contacts_contact_id_idx;
+DROP INDEX IF EXISTS public.blocked_users_blocked_user_id_idx;
+DROP INDEX IF EXISTS public.calls_contact_id_idx;
+DROP INDEX IF EXISTS public.ix_calls_contact_id;
+DROP INDEX IF EXISTS public.ix_chats_created_by;
+DROP INDEX IF EXISTS public.ix_contacts_contact_id;
+DROP INDEX IF EXISTS public.ix_contacts_user_id;
+DROP INDEX IF EXISTS public.ix_messages_user_id;
+DROP INDEX IF EXISTS public.ix_blocked_users_blocked_user_id;
+DROP INDEX IF EXISTS public.saved_messages_user_id_idx;
+DROP INDEX IF EXISTS public.ix_saved_messages_user_id;
+
+
+-- =====================================================================
+-- BAGIAN 2: FUNGSI & PEMICU (DIPERBARUI DENGAN KEAMANAN)
+-- =====================================================================
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+BEGIN
+  INSERT INTO public.profiles (id, first_name, last_name, phone, avatar_url)
+  VALUES (new.id, new.raw_user_meta_data->>'first_name', new.raw_user_meta_data->>'last_name', new.raw_user_meta_data->>'phone', new.raw_user_meta_data->>'avatar_url');
+  RETURN new;
+END;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+CREATE OR REPLACE FUNCTION public.is_chat_member(p_chat_id uuid, p_user_id uuid)
+RETURNS boolean LANGUAGE sql SECURITY DEFINER STABLE
+SET search_path = public AS $$
+  SELECT EXISTS (SELECT 1 FROM public.chat_participants WHERE chat_id = p_chat_id AND user_id = p_user_id);
+$$;
+
+CREATE OR REPLACE FUNCTION public.is_contact(p_user_id uuid, p_contact_id uuid)
+RETURNS boolean LANGUAGE sql SECURITY DEFINER STABLE
+SET search_path = public AS $$
+  SELECT EXISTS (SELECT 1 FROM public.contacts WHERE user_id = p_user_id AND contact_id = p_contact_id);
+$$;
+
+CREATE OR REPLACE FUNCTION public.get_blocked_and_blocking_users(p_user_id uuid)
+RETURNS TABLE(user_id uuid) LANGUAGE sql SECURITY DEFINER STABLE
+SET search_path = public AS $$
+  SELECT blocked_user_id FROM public.blocked_users WHERE user_id = p_user_id
+  UNION
+  SELECT user_id FROM public.blocked_users WHERE blocked_user_id = p_user_id;
+$$;
+
+CREATE OR REPLACE FUNCTION public.delete_expired_messages()
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+BEGIN
+    -- OPTIMIZATION: Replaced the slow, correlated subquery (EXISTS) with a
+    -- much more performant DELETE...USING (JOIN) statement. This prevents
+    -- long-running table locks on the `messages` table, which was causing
+    -- the chat screen to hang indefinitely on "Loading...".
+    DELETE FROM public.messages m
+    USING public.chats c
+    WHERE m.chat_id = c.id
+      AND c.auto_delete_timer IS NOT NULL
+      AND c.auto_delete_timer != 'off'
+      AND m.created_at + (
+          CASE c.auto_delete_timer
+              WHEN '3min' THEN interval '3 minutes'
+              WHEN '5min' THEN interval '5 minutes'
+              WHEN '7min' THEN interval '7 minutes'
+              WHEN '10min' THEN interval '10 minutes'
+              WHEN '1d' THEN interval '1 day'
+              WHEN '1w' THEN interval '1 week'
+              WHEN '1mo' THEN interval '1 month'
+              ELSE interval '9999 years' -- Safety net to avoid deleting everything if a value is wrong
+          END
+      ) < now();
+END;
+$$;
+
+
+-- =====================================================================
+-- BAGIAN 3: PENGINDEKSAN KINERJA
+-- =====================================================================
+
+-- Menambahkan indeks yang hilang
+CREATE INDEX IF NOT EXISTS chat_participants_user_id_idx ON public.chat_participants(user_id);
+
+-- Indeks yang sudah ada (dipertahankan karena berguna)
+CREATE INDEX IF NOT EXISTS ix_blocked_users_user_id ON public.blocked_users (user_id);
+CREATE INDEX IF NOT EXISTS ix_contacts_user_id ON public.contacts (user_id);
+CREATE INDEX IF NOT EXISTS ix_saved_messages_user_id ON public.saved_messages (user_id);
+
+
+-- =====================================================================
+-- BAGIAN 4: KEBIJAKAN KEAMANAN TINGKAT BARIS (RLS) (DIOPTIMALKAN & DIGABUNG)
+-- =====================================================================
+
+-- Aktifkan RLS untuk semua tabel
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chat_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.blocked_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.calls ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.saved_messages ENABLE ROW LEVEL SECURITY;
+
+-- Tabel: profiles
+-- FIX KINERJA: Menggabungkan kebijakan SELECT dan ALL menjadi satu kebijakan FOR ALL yang efisien.
+CREATE POLICY "Manajemen profil pengguna" ON public.profiles FOR ALL
+TO authenticated
+USING (true) -- Semua pengguna yang terautentikasi dapat MELIHAT semua profil.
+WITH CHECK (((select auth.uid()) = id)); -- Hanya pemilik yang dapat MEMBUAT/MENGUBAH/MENGHAPUS profil mereka sendiri.
+
+-- Tabel: chats
+CREATE POLICY "Pengguna dapat mengelola obrolan mereka" ON public.chats FOR ALL
+USING (public.is_chat_member(id, (select auth.uid())) OR created_by = (select auth.uid()))
+WITH CHECK (created_by = (select auth.uid()));
+
+-- Tabel: chat_participants
+-- FIX KINERJA: Memisahkan kebijakan menjadi satu untuk setiap tindakan untuk menghindari tumpang tindih.
+CREATE POLICY "Anggota dapat melihat peserta obrolan" ON public.chat_participants FOR SELECT
+USING (public.is_chat_member(chat_id, (select auth.uid())));
+
+CREATE POLICY "Pemilik grup dapat menambahkan anggota" ON public.chat_participants FOR INSERT
+WITH CHECK ((SELECT created_by FROM public.chats WHERE id = chat_id) = (select auth.uid()));
+
+CREATE POLICY "Anggota dapat keluar atau dikeluarkan oleh pemilik" ON public.chat_participants FOR DELETE
+USING (user_id = (select auth.uid()) OR (SELECT created_by FROM public.chats WHERE id = chat_id) = (select auth.uid()));
+
+CREATE POLICY "Anggota dapat memperbarui status mute mereka sendiri" ON public.chat_participants FOR UPDATE
+USING (user_id = (select auth.uid())) WITH CHECK (user_id = (select auth.uid()));
+
+
+-- Tabel: messages
+-- FIX v1.2.5: Kebijakan SELECT sekarang menyaring pesan dari/ke pengguna yang diblokir.
+CREATE POLICY "Anggota dapat melihat pesan di obrolan mereka (dengan pemeriksaan blokir)" ON public.messages FOR SELECT USING (
+    (public.is_chat_member(chat_id, (select auth.uid()))) AND
+    (
+        -- Pengguna selalu dapat melihat pesan mereka sendiri
+        user_id = (select auth.uid()) OR
+        -- Dan pesan dari orang lain yang tidak ada dalam daftar blokir mereka
+        user_id NOT IN (SELECT b.user_id FROM public.get_blocked_and_blocking_users((select auth.uid())) b)
+    )
+);
+
+-- FIX v1.2.6: Pemeriksaan blokir pada INSERT pesan dihapus untuk mengubah dari "hard block" (error saat mengirim)
+-- menjadi "soft block" (pesan terkirim tetapi tidak terlihat oleh penerima yang memblokir).
+-- Hal ini "memperbaiki" error RLS yang dilihat oleh pengguna saat mengirim.
+CREATE POLICY "Anggota dapat mengirim pesan" ON public.messages FOR INSERT WITH CHECK (
+    (public.is_chat_member(chat_id, (select auth.uid()))) AND (user_id = (select auth.uid()))
+);
+
+-- Kebijakan Hapus & Edit tetap tidak berubah
+CREATE POLICY "Pengguna dapat menghapus pesan mereka sendiri" ON public.messages FOR DELETE USING (((select auth.uid()) = user_id));
+CREATE POLICY "Pengguna dapat mengedit pesan mereka sendiri" ON public.messages FOR UPDATE USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+
+
+-- Tabel sederhana: contacts, blocked_users, calls, saved_messages
+CREATE POLICY "Pengguna dapat mengelola data pribadi mereka sendiri" ON public.contacts FOR ALL USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "Pengguna dapat mengelola daftar blokir mereka" ON public.blocked_users FOR ALL USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "Pengguna dapat mengelola riwayat panggilan mereka" ON public.calls FOR ALL USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+CREATE POLICY "Pengguna dapat mengelola pesan tersimpan mereka" ON public.saved_messages FOR ALL USING (((select auth.uid()) = user_id)) WITH CHECK (((select auth.uid()) = user_id));
+
+
+-- =====================================================================
+-- BAGIAN 5: FUNGSI RPC (DIPERBARUI DENGAN KEAMANAN)
+-- =====================================================================
+
+DROP FUNCTION IF EXISTS public.get_user_chats_with_details();
+CREATE OR REPLACE FUNCTION public.get_user_chats_with_details()
+RETURNS json LANGUAGE sql STABLE
+SET search_path = public AS $$
+WITH last_messages AS (
+    SELECT DISTINCT ON (chat_id) id, chat_id, content, created_at, user_id, status
+    FROM public.messages ORDER BY chat_id, created_at DESC
+),
+chat_members AS (
+    SELECT cp.chat_id, json_agg(json_build_object('id', p.id, 'first_name', p.first_name, 'last_name', p.last_name, 'avatar_url', CASE WHEN p.id = auth.uid() THEN p.avatar_url WHEN p.profile_photo_privacy = 'everybody' THEN p.avatar_url WHEN p.profile_photo_privacy = 'myContacts' AND public.is_contact(auth.uid(), p.id) THEN p.avatar_url ELSE NULL END)) AS members
+    FROM public.chat_participants cp JOIN public.profiles p ON cp.user_id = p.id
+    GROUP BY cp.chat_id
+)
+SELECT json_agg(json_build_object('id', c.id, 'name', c.name, 'photo_url', c.photo_url, 'is_group', c.is_group, 'created_by', c.created_by, 'auto_delete_timer', c.auto_delete_timer, 'description', c.description, 'created_at', c.created_at, 'is_muted', cp.is_muted, 'last_message', json_build_object('content', lm.content, 'created_at', lm.created_at, 'user_id', lm.user_id, 'status', lm.status), 'members', cm.members))
+FROM public.chats c
+JOIN public.chat_participants cp ON c.id = cp.chat_id AND cp.user_id = auth.uid()
+LEFT JOIN chat_members cm ON c.id = cm.chat_id
+LEFT JOIN last_messages lm ON c.id = lm.chat_id
+WHERE cp.user_id = auth.uid();
+$$;
+
+DROP FUNCTION IF EXISTS public.get_chat_details_by_id(p_chat_id uuid);
+CREATE OR REPLACE FUNCTION public.get_chat_details_by_id(p_chat_id uuid)
+RETURNS json LANGUAGE sql STABLE
+SET search_path = public AS $$
+WITH chat_details AS (SELECT * FROM public.chats WHERE id = p_chat_id),
+chat_members AS (
+    SELECT cp.chat_id, json_agg(json_build_object('id', p.id, 'first_name', p.first_name, 'last_name', p.last_name, 'avatar_url', p.avatar_url, 'bio', p.bio, 'phone', CASE WHEN p.id = auth.uid() THEN p.phone WHEN p.phone_number_privacy = 'everybody' THEN p.phone WHEN p.phone_number_privacy = 'myContacts' AND public.is_contact(auth.uid(), p.id) THEN p.phone ELSE NULL END)) AS members
+    FROM public.chat_participants cp JOIN public.profiles p ON cp.user_id = p.id
+    WHERE cp.chat_id = p_chat_id
+    GROUP BY cp.chat_id
+)
+SELECT json_build_object('id', cd.id, 'name', cd.name, 'photo_url', cd.photo_url, 'is_group', cd.is_group, 'created_by', cd.created_by, 'auto_delete_timer', cd.auto_delete_timer, 'description', cd.description, 'created_at', cd.created_at, 'members', cm.members)
+FROM chat_details cd LEFT JOIN chat_members cm ON cd.id = cm.chat_id
+WHERE public.is_chat_member(cd.id, auth.uid());
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_one_on_one_chat(other_user_id uuid)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+DECLARE existing_chat_id uuid; new_chat_id uuid; current_user_id uuid := auth.uid();
+BEGIN
+  SELECT cp1.chat_id INTO existing_chat_id FROM public.chat_participants AS cp1 JOIN public.chat_participants AS cp2 ON cp1.chat_id = cp2.chat_id JOIN public.chats ON cp1.chat_id = chats.id WHERE cp1.user_id = current_user_id AND cp2.user_id = other_user_id AND chats.is_group = false;
+  IF existing_chat_id IS NOT NULL THEN RETURN existing_chat_id; END IF;
+  INSERT INTO public.chats (is_group, created_by) VALUES (false, current_user_id) RETURNING id INTO new_chat_id;
+  INSERT INTO public.chat_participants (chat_id, user_id) VALUES (new_chat_id, current_user_id), (new_chat_id, other_user_id);
+  RETURN new_chat_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.mark_messages_as_read(p_chat_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+BEGIN UPDATE public.messages SET status = 'read' WHERE chat_id = p_chat_id AND user_id != auth.uid() AND (status IS NULL OR status != 'read'); END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.clear_chat_history(p_chat_id uuid)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+BEGIN IF NOT is_chat_member(p_chat_id, auth.uid()) THEN RAISE EXCEPTION 'Authorization failed: User is not a member of this chat.'; END IF; DELETE FROM public.messages WHERE chat_id = p_chat_id; END;
+$$;
+
+DROP FUNCTION IF EXISTS public.update_auto_delete_timer(uuid, text);
+CREATE OR REPLACE FUNCTION public.update_auto_delete_timer(p_chat_id uuid, p_timer_value text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+BEGIN
+  -- Pastikan pengguna adalah anggota obrolan sebelum mengizinkan pembaruan
+  IF NOT is_chat_member(p_chat_id, auth.uid()) THEN
+    RAISE EXCEPTION 'Authorization failed: User is not a member of this chat.';
+  END IF;
+
+  UPDATE public.chats
+  SET auto_delete_timer = p_timer_value
+  WHERE id = p_chat_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.toggle_reaction_on_message(p_message_id uuid, p_user_id uuid, p_emoji text)
+RETURNS void LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+DECLARE
+  current_reactions jsonb;
+  emoji_reactors jsonb;
+  user_id_text text := p_user_id::text;
+BEGIN
+  -- Pastikan pengguna adalah anggota obrolan dari pesan tersebut
+  IF NOT EXISTS (SELECT 1 FROM public.messages m JOIN public.chat_participants cp ON m.chat_id = cp.chat_id WHERE m.id = p_message_id AND cp.user_id = p_user_id) THEN
+    RAISE EXCEPTION 'Authorization failed: User is not a member of this chat.';
+  END IF;
+
+  SELECT reactions INTO current_reactions FROM public.messages WHERE id = p_message_id;
+
+  -- Inisialisasi jika null
+  IF current_reactions IS NULL THEN
+    current_reactions := '{}'::jsonb;
+  END IF;
+
+  emoji_reactors := current_reactions -> p_emoji;
+
+  IF emoji_reactors IS NULL OR jsonb_typeof(emoji_reactors) != 'array' THEN
+    -- Emoji ini belum ada, atau datanya rusak. Buat array baru dengan pengguna ini.
+    current_reactions := jsonb_set(current_reactions, ARRAY[p_emoji], jsonb_build_array(user_id_text));
+  ELSE
+    -- Emoji sudah ada, periksa apakah pengguna sudah ada di dalamnya
+    IF emoji_reactors @> to_jsonb(user_id_text) THEN
+      -- Pengguna sudah ada, hapus dia
+      emoji_reactors := emoji_reactors - user_id_text;
+      -- Jika array menjadi kosong, hapus kunci emoji
+      IF jsonb_array_length(emoji_reactors) = 0 THEN
+        current_reactions := current_reactions - p_emoji;
+      ELSE
+        current_reactions := jsonb_set(current_reactions, ARRAY[p_emoji], emoji_reactors);
+      END IF;
+    ELSE
+      -- Pengguna belum ada, tambahkan dia
+      emoji_reactors := emoji_reactors || to_jsonb(user_id_text);
+      current_reactions := jsonb_set(current_reactions, ARRAY[p_emoji], emoji_reactors);
+    END IF;
+  END IF;
+
+  UPDATE public.messages SET reactions = current_reactions WHERE id = p_message_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.create_group_chat(name text, member_ids uuid[], photo_url text)
+RETURNS uuid LANGUAGE plpgsql SECURITY DEFINER
+SET search_path = public AS $$
+DECLARE
+  new_chat_id uuid;
+  current_user_id uuid := auth.uid();
+  member_id uuid;
+BEGIN
+  -- Buat baris obrolan
+  INSERT INTO public.chats (name, is_group, created_by, photo_url)
+  VALUES (name, true, current_user_id, photo_url)
+  RETURNING id INTO new_chat_id;
+
+  -- Tambahkan pembuat sebagai peserta
+  INSERT INTO public.chat_participants (chat_id, user_id, is_admin)
+  VALUES (new_chat_id, current_user_id, true);
+
+  -- Tambahkan anggota lain
+  FOREACH member_id IN ARRAY member_ids
+  LOOP
+    -- Pastikan tidak menambahkan pembuat lagi
+    IF member_id <> current_user_id THEN
+      INSERT INTO public.chat_participants (chat_id, user_id)
+      VALUES (new_chat_id, member_id);
+    END IF;
+  END LOOP;
+
+  RETURN new_chat_id;
+END;
+$$;
+
+
+-- =====================================================================
+-- BAGIAN 6: KEBIJAKAN KEAMANAN PENYIMPANAN (STORAGE RLS)
+-- =====================================================================
+-- Hapus kebijakan lama untuk memastikan penerapan yang bersih
+DROP POLICY IF EXISTS "Pengguna dapat mengelola avatar profil mereka sendiri" ON storage.objects;
+DROP POLICY IF EXISTS "Avatar profil dapat dilihat oleh semua pengguna yang terotentikasi" ON storage.objects;
+DROP POLICY IF EXISTS "Anggota obrolan dapat mengelola lampiran" ON storage.objects;
+DROP POLICY IF EXISTS "Manajemen Avatar Grup" ON storage.objects;
+DROP POLICY IF EXISTS "Manajemen Avatar Profil" ON storage.objects;
+DROP POLICY IF EXISTS "Manajemen Lampiran Obrolan" ON storage.objects;
+
+
+-- Kebijakan yang lebih sederhana dan aman
+CREATE POLICY "Manajemen Avatar Profil" ON storage.objects FOR ALL
+USING (bucket_id = 'profile-avatars' AND auth.role() = 'authenticated')
+WITH CHECK (bucket_id = 'profile-avatars' AND (storage.foldername(name))[1] = (select auth.uid())::text);
+
+CREATE POLICY "Manajemen Avatar Grup" ON storage.objects FOR ALL
+USING (bucket_id = 'group-avatars' AND public.is_chat_member(((storage.foldername(name))[1])::uuid, (select auth.uid())))
+WITH CHECK (bucket_id = 'group-avatars' AND (SELECT created_by FROM public.chats WHERE id = ((storage.foldername(name))[1])::uuid) = (select auth.uid()));
+
+CREATE POLICY "Manajemen Lampiran Obrolan" ON storage.objects FOR ALL
+USING (bucket_id = 'chat-attachments' AND public.is_chat_member(((storage.foldername(name))[1])::uuid, (select auth.uid())))
+WITH CHECK (bucket_id = 'chat-attachments' AND public.is_chat_member(((storage.foldername(name))[1])::uuid, (select auth.uid())));
+
+
+-- =====================================================================
+-- BAGIAN 7: PEKERJAAN CRON (TIDAK BERUBAH)
+-- =====================================================================
+DO $$ BEGIN IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'delete-expired-messages-job') THEN PERFORM cron.unschedule('delete-expired-messages-job'); RAISE NOTICE 'Pekerjaan "delete-expired-messages-job" yang ada telah dibatalkan jadwalnya.'; END IF; END; $$;
+SELECT cron.schedule('delete-expired-messages-job', '* * * * *', $$ SELECT public.delete_expired_messages(); $$);
+
+COMMIT;

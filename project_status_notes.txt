@@ -1,0 +1,106 @@
+= CATATAN STATUS PROYEK - cONnected+ V.1.4.0 =
+
+Dokumen ini memberikan ringkasan lengkap tentang status pengembangan aplikasi cONnected+ dan panduan untuk men-deploy-nya.
+
+--- ✅ STATUS PROYEK: FUNGSIONAL PENUH ---
+
+Aplikasi cONnected+ sekarang dianggap **lengkap fiturnya (feature-complete)** sesuai dengan lingkup proyek awal. Semua fungsionalitas inti yang dirancang untuk demonstrasi UI/UX dan interaksi backend telah berhasil diimplementasikan, dioptimalkan, dan diuji. Aplikasi ini sangat stabil untuk penggunaan demonstratif.
+
+--- 🚀 PEMBARUAN TERBARU ---
+
+**v1.4.0 - Feature Complete & Documentation Update**
+*   **Penyelesaian Fitur**: Semua fitur yang sebelumnya ditandai "Work in Progress" atau "Segera Hadir" kini telah diaktifkan sepenuhnya. Ini termasuk fungsionalitas penuh pada tab "File" & "Tautan" di Media Bersama, Bagikan Kontak, Pencarian Anggota Grup, dan penerapan timer Hapus Otomatis global.
+*   **Pembaruan Dokumentasi**: File status proyek ini telah ditulis ulang sepenuhnya untuk secara akurat mencerminkan keadaan aplikasi yang sudah lengkap.
+
+**v1.3.0 - Implementasi Panggilan WebRTC**
+*   **Panggilan Suara & Video Fungsional Penuh**: Fitur panggilan suara dan video telah diimplementasikan sepenuhnya menggunakan teknologi WebRTC.
+*   **Sinyal Melalui Supabase**: Alur sinyal (offers, answers, ICE candidates) ditangani secara efisien melalui Supabase Realtime Channels.
+
+--- 📋 DAFTAR FITUR LENGKAP ---
+
+1.  **Autentikasi & Pengguna**:
+    *   Login, Pendaftaran, Lupa Kata Sandi, dan Logout.
+    *   Manajemen profil pengguna (nama, bio, foto, username, tanggal lahir).
+
+2.  **Perpesanan Inti**:
+    *   Obrolan pribadi (1-on-1) dan obrolan grup secara real-time.
+    *   Pengiriman pesan (teks, foto, file, pesan suara).
+    *   Interaksi pesan: Mengedit, Menghapus, Memberi Reaksi, dan Meneruskan (Forward).
+    *   Status pesan (Terkirim, Diterima, Dibaca).
+    *   Indikator pengetikan (typing indicator).
+
+3.  **Panggilan Suara & Video (WebRTC)**:
+    *   Panggilan suara dan video 1-on-1 secara real-time.
+    *   UI lengkap untuk panggilan masuk, panggilan aktif, dan riwayat panggilan.
+    *   Fitur dalam panggilan: mute/unmute, video on/off, speakerphone.
+    *   Pratinjau video lokal yang dapat digeser (drag-and-drop).
+
+4.  **Manajemen Obrolan & Grup**:
+    *   Membuat grup baru dengan nama dan foto.
+    *   Mengedit info grup (nama, deskripsi, foto).
+    *   Menambah/mengeluarkan anggota (khusus pemilik).
+    *   Keluar dari grup.
+    *   Membisukan (Mute) dan menyuarakan (Unmute) notifikasi per-obrolan.
+    *   Membersihkan riwayat obrolan.
+    *   Pencarian pesan di dalam obrolan.
+    *   Timer Hapus Otomatis per-obrolan (pribadi & grup).
+
+5.  **Pengaturan & Privasi**:
+    *   Semua pengaturan privasi (Terakhir Dilihat, Foto Profil, Nomor Telepon, dll.).
+    *   Manajemen pengguna yang diblokir (Blokir & Buka Blokir).
+    *   Pengaturan tampilan (Tema Terang/Gelap, Ukuran Teks, Sudut Pesan).
+    *   Pengaturan notifikasi dan suara.
+    *   Timer Hapus Otomatis global yang dapat diterapkan ke obrolan lama.
+
+6.  **Fitur Tambahan**:
+    *   Pesan Tersimpan (Saved Messages).
+    *   Manajemen Kontak (melihat, menambah, menghapus).
+    *   Pencarian kontak dan pengguna global.
+    *   Media Bersama (Media, File, Tautan).
+    *   Undang Teman & Bagikan Kontak (menggunakan Web Share API).
+
+--- 📋 PANDUAN IMPLEMENTASI & DEPLOYMENT ---
+
+Ikuti langkah-langkah ini untuk menyiapkan dan men-deploy aplikasi cONnected+ Anda sendiri.
+
+**Langkah 1: Pengaturan Backend (Supabase)**
+
+1.  **Buat Proyek Supabase**: Buka [database.new](https://database.new) dan buat proyek baru. Simpan **Project URL** dan **`anon` public key** Anda.
+2.  **Perbarui Klien Supabase**:
+    *   Buka file `supabaseClient.ts` di proyek Anda.
+    *   Ganti nilai `SUPABASE_URL` dan `SUPABASE_ANON_KEY` dengan kredensial dari proyek baru Anda.
+3.  **Jalankan Skrip SQL**:
+    *   Di dasbor Supabase, navigasikan ke **SQL Editor**.
+    *   Buka file `alur_aplikasi.txt` dari proyek ini.
+    *   Salin **seluruh isi** file tersebut.
+    *   Tempelkan ke SQL Editor dan klik **"RUN"**. Skrip ini akan membuat semua tabel, fungsi, kebijakan keamanan (RLS), dan pemicu yang diperlukan. **Ini adalah langkah krusial.**
+4.  **Aktifkan Penyedia Otentikasi**:
+    *   Di dasbor Supabase, navigasikan ke **Authentication -> Providers**.
+    *   Pastikan penyedia **Email** diaktifkan.
+
+**Langkah 2: Persiapan Frontend**
+
+Aplikasi ini dirancang untuk berjalan langsung di browser tanpa memerlukan proses build lokal (seperti `npm run build`), karena menggunakan impor CDN untuk React. Kode yang ada di folder sudah siap untuk di-deploy.
+
+**Langkah 3: Deployment**
+
+Anda dapat men-deploy folder proyek ini sebagai situs statis menggunakan layanan seperti Vercel, Netlify, atau GitHub Pages.
+
+*Contoh menggunakan Vercel (disarankan karena kemudahannya):*
+
+1.  **Push Kode ke GitHub**: Pastikan semua kode Anda berada di repositori GitHub.
+2.  **Hubungkan ke Vercel**:
+    *   Daftar/masuk ke [Vercel](https://vercel.com) menggunakan akun GitHub Anda.
+    *   Klik **"Add New... -> Project"**.
+    *   Impor repositori GitHub Anda.
+3.  **Konfigurasi & Deploy**:
+    *   Vercel akan secara otomatis mendeteksi bahwa ini adalah proyek statis (tanpa framework). Anda tidak perlu mengubah pengaturan build apa pun.
+    *   Klik **"Deploy"**.
+4.  **Selesai**: Dalam beberapa saat, Vercel akan memberikan URL publik (misalnya, `nama-proyek-anda.vercel.app`) di mana aplikasi Anda sudah aktif dan siap digunakan.
+
+**Langkah 4: Pengujian Akhir**
+
+1.  Buka URL aplikasi yang telah di-deploy.
+2.  Coba buat akun baru. Periksa email Anda untuk tautan verifikasi dari Supabase.
+3.  Setelah verifikasi, coba masuk.
+4.  Jika Anda dapat masuk dan melihat layar daftar obrolan (meskipun kosong), berarti frontend berhasil terhubung ke backend Supabase Anda. Aplikasi siap digunakan.

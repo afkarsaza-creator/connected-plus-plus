@@ -1,0 +1,8 @@
+{
+  "name": "cONnected+ Versi V.1.4.1",
+  "description": "Aplikasi obrolan real-time yang kaya fitur dengan peningkatan kinerja dan perbaikan bug.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
